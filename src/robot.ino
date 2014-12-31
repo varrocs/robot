@@ -1,4 +1,9 @@
 #include <Servo.h>
+#include "message.h"
+
+#define COMM 1
+
+const int STATUS_LED       = 13;
 
 const int HEAD_SERVO_PIN   = 12;
 const int HEAD_ECHO_PIN    = 2; // Echo Pin
@@ -97,6 +102,10 @@ void setup() {
   pinMode(MOTOR_IN4, OUTPUT);
 
   rightMotor(0);
+  leftMotor(0);
+
+  // Communication
+  Serial.begin(9600);
 }
 
 bool doNeedTurn(int direction) {
@@ -119,7 +128,7 @@ void go() {
 	rightMotor(255);
 }
 
-void loop() {
+void simpleLoop() {
   stop();
   if (doNeedTurn(90)) {
   	bool needLeft = doNeedTurn(135);
@@ -145,3 +154,81 @@ void loop() {
   delay(DELAY_10CM);
   Serial.println();
 }
+
+ControlMessage receivedMessage;
+ControlMessage sendMessage;
+byte messageBuffer[5];
+
+void doSendMessage() {
+	Serial.write(sendMessage.len);
+	Serial.write(sendMessage.type);
+	Serial.write(sendMessage.param1);
+	Serial.write('\n');
+}
+
+void sendDistance(int distance) {
+	byte dist = (byte) min(distance, 255);
+	sendMessage.len = 3;
+	sendMessage.type = ECHO_RESPONSE;
+	sendMessage.param1 = dist;
+	doSendMessage();
+}
+
+void sendPong() {
+	sendMessage.len = 3;
+	sendMessage.type = PONG;
+	sendMessage.param1 = 1;
+	doSendMessage();
+}
+
+void executeReceivedMessage() {
+	switch (receivedMessage.type) 
+	{
+	case ECHO_REQUEST:
+		sendDistance(measureDistance());
+		break;
+	case SET_LEFT_MOTOR:
+		leftMotor(receivedMessage.param1);
+		break;
+	case SET_RIGHT_MOTOR:
+		rightMotor(receivedMessage.param1);
+		break;
+	case SET_HEAD:
+		headServo.write(receivedMessage.param1);
+		break;
+	case WAIT:
+		delay(receivedMessage.param1);
+		break;
+	case PING:
+		sendPong();
+		// fallthrough
+	case PONG:
+		// Flash the status led
+		digitalWrite(STATUS_LED, HIGH);
+		delay(100);
+		digitalWrite(STATUS_LED, LOW);
+	}
+}
+
+void commLoop() 
+{
+	
+	ControlMessage message;
+	if (Serial.readBytesUntil('\n', (char*)messageBuffer, sizeof messageBuffer))
+	{
+		if (decode(messageBuffer, &receivedMessage))
+		{
+			executeReceivedMessage();
+		}
+	}
+}
+
+void loop() 
+{
+#if COMM
+commLoop();
+#else
+simpleLoop();
+#endif
+}
+
