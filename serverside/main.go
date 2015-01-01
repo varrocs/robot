@@ -1,11 +1,12 @@
-// Package main provides ...
 package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type ControlMessage struct {
 const (
 	PING_PONG_SECONDS = 10
 	DEFAULT_DEVICE    = "/dev/ttyACM0"
-	MESSAGE_LENGTH    = 3
+	MESSAGE_LENGTH    = 4
 )
 
 const (
@@ -34,7 +35,7 @@ const (
 
 func parseBuffer(buffer []byte) (*ControlMessage, error) {
 	if len(buffer) < MESSAGE_LENGTH {
-		return nil, errors.New("Too short buffer")
+		return nil, errors.New("Too show buffer")
 	}
 	result := new(ControlMessage)
 	result.Length = buffer[0]
@@ -51,13 +52,23 @@ func serializeMessage(message *ControlMessage, result []byte) {
 	result[3] = '\n'
 }
 
-func messageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh chan *ControlMessage) {
+func startMessageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh chan *ControlMessage) {
 	// Start reading
 	go func() {
 		log.Println("Start reading")
-		readBuffer := make([]byte, 4, 4)
+		readBuffer := make([]byte, MESSAGE_LENGTH, MESSAGE_LENGTH)
 		for {
-			device.Read(readBuffer)
+			length, err := device.Read(readBuffer)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			if length == 0 {
+				log.Println("Zero message read, finishing read cycle")
+				return
+			}
+
 			message, err := parseBuffer(readBuffer)
 			if err == nil {
 				msgRecvCh <- message
@@ -70,7 +81,7 @@ func messageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh chan *
 	// Start sending
 	go func() {
 		log.Println("Start writing")
-		writeBuffer := make([]byte, 4, 4)
+		writeBuffer := make([]byte, MESSAGE_LENGTH, MESSAGE_LENGTH)
 		for {
 			message := <-msgSendCh
 			serializeMessage(message, writeBuffer)
@@ -79,7 +90,7 @@ func messageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh chan *
 	}()
 }
 
-func startPingPong(msgSendCh chan *ControlMessage) {
+func doPingPong(msgSendCh chan *ControlMessage) {
 	ch := time.NewTicker(PING_PONG_SECONDS * time.Second).C
 	for {
 		<-ch
@@ -89,7 +100,7 @@ func startPingPong(msgSendCh chan *ControlMessage) {
 	}
 }
 
-func startRead(readchan chan *ControlMessage) {
+func doRead(readchan chan *ControlMessage) {
 	for {
 		message := <-readchan
 		log.Println("Message received", message)
@@ -97,16 +108,22 @@ func startRead(readchan chan *ControlMessage) {
 }
 
 func main() {
+	deviceName := flag.String("serialdevice", DEFAULT_DEVICE, "The comm with the robot will happen through this device")
+	flag.Parse()
+
 	fmt.Println("Starting comm")
-	device, err := os.Open(DEFAULT_DEVICE)
+	device, err := os.Open(*deviceName)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	messageSendCh := make(chan *ControlMessage, 5)
-	messageRecvCh := make(chan *ControlMessage, 5)
+	messageSendCh := make(chan *ControlMessage)
+	messageRecvCh := make(chan *ControlMessage)
 
-	messageIO(device, messageRecvCh, messageSendCh)
-	go startPingPong(messageSendCh)
-	go startRead(messageRecvCh)
+	var wg sync.WaitGroup
+	startMessageIO(device, messageRecvCh, messageSendCh)
+	go doPingPong(messageSendCh)
+	go doRead(messageRecvCh)
+	wg.Add(1)
+	wg.Wait()
 }

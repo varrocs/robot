@@ -105,6 +105,7 @@ void setup() {
   leftMotor(0);
 
   // Communication
+  pinMode(STATUS_LED, OUTPUT);
   Serial.begin(9600);
 }
 
@@ -212,7 +213,10 @@ void executeReceivedMessage() {
 
 void commLoop() 
 {
-	
+	digitalWrite(STATUS_LED, HIGH);
+	delay(200);
+	digitalWrite(STATUS_LED, LOW);
+
 	ControlMessage message;
 	if (Serial.readBytesUntil('\n', (char*)messageBuffer, sizeof messageBuffer))
 	{
