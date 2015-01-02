@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,47 +12,11 @@ import (
 	"github.com/tarm/goserial"
 )
 
-type ControlMessage struct {
-	Length      byte
-	MessageType byte
-	Param1      byte
-}
-
 const (
 	PING_PONG_SECONDS     = 5
 	DEFAULT_DEVICE        = "/dev/ttyACM0"
 	MESSAGE_BUFFER_LENGTH = 4
 )
-
-const (
-	MT_ECHO_REQUEST    = 0
-	MT_ECHO_RESPONSE   = 1
-	MT_SET_LEFT_MOTOR  = 2
-	MT_SET_RIGHT_MOTOR = 3
-	MT_SET_HEAD        = 4
-	MT_WAIT            = 5
-	MT_PING            = 6
-	MT_PONG            = 7
-)
-
-func parseBuffer(buffer []byte) (*ControlMessage, error) {
-	if len(buffer) < MESSAGE_BUFFER_LENGTH {
-		return nil, errors.New("Too show buffer")
-	}
-	result := new(ControlMessage)
-	result.Length = buffer[0]
-	result.MessageType = buffer[1]
-	result.Param1 = buffer[2]
-	return result, nil
-
-}
-
-func serializeMessage(message *ControlMessage, result []byte) {
-	result[0] = message.Length
-	result[1] = message.MessageType
-	result[2] = message.Param1
-	result[3] = '\n'
-}
 
 func startMessageIO(device io.ReadWriteCloser, msgRecvCh chan *ControlMessage, msgSendCh chan *ControlMessage) {
 	// Start reading
@@ -99,18 +62,22 @@ func startMessageIO(device io.ReadWriteCloser, msgRecvCh chan *ControlMessage, m
 func doPingPong(msgSendCh chan *ControlMessage) {
 	ch := time.NewTicker(PING_PONG_SECONDS * time.Second).C
 	for {
-		<-ch
-		msg := ControlMessage{MESSAGE_BUFFER_LENGTH - 1, MT_PING, 1}
-		msgSendCh <- &msg
+		<-ch // Wait for the timer
+		msg := NewSimpleMessage(MT_PING)
+		msgSendCh <- msg
 	}
 }
 
-func doRead(readchan chan *ControlMessage) {
+func doControl(messageRecvCh chan *ControlMessage, messageSendCh chan *ControlMessage, robotChannel chan *ControlMessage) {
 	for {
-		message := <-readchan
-		switch message.MessageType {
-		case MT_PONG:
+		msg := <-messageRecvCh
+		typee := msg.MessageType
+		if typee == MT_PONG {
 			log.Println("PONG received!")
+		} else if typee >= MT_INVALID {
+			log.Println("Unknown message type! ", typee)
+		} else {
+			robotChannel <- msg
 		}
 	}
 }
@@ -128,12 +95,17 @@ func main() {
 
 	messageSendCh := make(chan *ControlMessage)
 	messageRecvCh := make(chan *ControlMessage)
+	messageRobotCh := make(chan *ControlMessage)
 
 	var wg sync.WaitGroup
 
+	robot := NewRobot(messageRobotCh, messageSendCh)
+
 	startMessageIO(serial, messageRecvCh, messageSendCh)
 	go doPingPong(messageSendCh)
-	go doRead(messageRecvCh)
+	go doControl(messageRecvCh, messageSendCh, messageRobotCh)
+
+	robot.Start()
 
 	wg.Add(1)
 	wg.Wait()

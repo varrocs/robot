@@ -4,14 +4,14 @@
 typedef unsigned char byte;
 
 typedef enum ControlMessageType {
-	ECHO_REQUEST = 0,
-	ECHO_RESPONSE = 1,
-	SET_LEFT_MOTOR = 2,
-	SET_RIGHT_MOTOR = 3,
-	SET_HEAD = 4,
-	WAIT = 5,
-	PING = 6,
-	PONG = 7,
+	ECHO_REQUEST = 1,
+	ECHO_RESPONSE = 2,
+	SET_LEFT_MOTOR = 3,
+	SET_RIGHT_MOTOR = 4,
+	SET_HEAD = 5,
+	WAIT = 6,
+	PING = 7,
+	PONG = 8,
 	MESSAGE_TYPE_COUNT
 } ControlMessageType;
 
