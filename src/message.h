@@ -23,5 +23,5 @@ typedef struct ControlMessage {
 
 } ControlMessage;
 
-bool decode(const byte* raw_message, ControlMessage* message);
+int decode(const byte* raw_message, ControlMessage* message);
 #endif

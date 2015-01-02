@@ -36,8 +36,6 @@ int measureDistance() {
 }
 
 void rightMotor(int speed) {
-	Serial.print("right - ");
-	Serial.println(speed);
 	// Stop
 	if (speed==0) {
 		digitalWrite(MOTOR_ENA, LOW);
@@ -57,9 +55,6 @@ void rightMotor(int speed) {
 }
 
 void leftMotor(int speed) {
-	Serial.print("left - ");
-	Serial.println(speed);
-
 	// Stop
 	if (speed==0) {
 		digitalWrite(MOTOR_ENB, LOW);
@@ -81,8 +76,6 @@ void leftMotor(int speed) {
 int headDirection = 90;
 
 void setup() {
-  Serial.begin(9600);
-  
   // Head setup
   //  Echo location
   pinMode(HEAD_TRIGGER_PIN, OUTPUT);
@@ -113,9 +106,6 @@ bool doNeedTurn(int direction) {
   headServo.write(direction);
   delay(500);
   int distance=measureDistance();
-  Serial.print(direction);
-  Serial.print(" - ");
-  Serial.println(distance);
 
   return distance < 30;
 }
@@ -153,7 +143,6 @@ void simpleLoop() {
   	go();
   }
   delay(DELAY_10CM);
-  Serial.println();
 }
 
 ControlMessage receivedMessage;
@@ -220,11 +209,16 @@ void commLoop()
 	ControlMessage message;
 	if (Serial.readBytesUntil('\n', (char*)messageBuffer, sizeof messageBuffer))
 	{
-		if (decode(messageBuffer, &receivedMessage))
+		int result = decode(messageBuffer, &receivedMessage);
+		if (result == 0)
 		{
 			executeReceivedMessage();
+		} else {
+			Serial.print("ERROR\n");
+			Serial.write(result);
+			Serial.print("\n");
 		}
-	}
+	} 
 }
 
 void loop() 

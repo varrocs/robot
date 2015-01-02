@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"os"
 	"sync"
 	"time"
+
+	"github.com/tarm/goserial"
 )
 
 type ControlMessage struct {
@@ -17,9 +20,9 @@ type ControlMessage struct {
 }
 
 const (
-	PING_PONG_SECONDS = 10
-	DEFAULT_DEVICE    = "/dev/ttyACM0"
-	MESSAGE_LENGTH    = 4
+	PING_PONG_SECONDS     = 5
+	DEFAULT_DEVICE        = "/dev/ttyACM0"
+	MESSAGE_BUFFER_LENGTH = 4
 )
 
 const (
@@ -34,7 +37,7 @@ const (
 )
 
 func parseBuffer(buffer []byte) (*ControlMessage, error) {
-	if len(buffer) < MESSAGE_LENGTH {
+	if len(buffer) < MESSAGE_BUFFER_LENGTH {
 		return nil, errors.New("Too show buffer")
 	}
 	result := new(ControlMessage)
@@ -52,22 +55,21 @@ func serializeMessage(message *ControlMessage, result []byte) {
 	result[3] = '\n'
 }
 
-func startMessageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh chan *ControlMessage) {
+func startMessageIO(device io.ReadWriteCloser, msgRecvCh chan *ControlMessage, msgSendCh chan *ControlMessage) {
 	// Start reading
 	go func() {
 		log.Println("Start reading")
-		readBuffer := make([]byte, MESSAGE_LENGTH, MESSAGE_LENGTH)
+		var reader *bufio.Reader = bufio.NewReader(device)
 		for {
-			length, err := device.Read(readBuffer)
-			if err != nil {
+			readBuffer, err := reader.ReadSlice('\n')
+			if err == io.EOF {
+				time.Sleep(1 * time.Second)
+				continue
+			} else if err != nil {
 				log.Println(err)
-				return
+				continue
 			}
-
-			if length == 0 {
-				log.Println("Zero message read, finishing read cycle")
-				return
-			}
+			log.Println(" >>>>>>>>>>> RAW MESSAGE: ", readBuffer)
 
 			message, err := parseBuffer(readBuffer)
 			if err == nil {
@@ -81,11 +83,15 @@ func startMessageIO(device *os.File, msgRecvCh chan *ControlMessage, msgSendCh c
 	// Start sending
 	go func() {
 		log.Println("Start writing")
-		writeBuffer := make([]byte, MESSAGE_LENGTH, MESSAGE_LENGTH)
+		writeBuffer := make([]byte, MESSAGE_BUFFER_LENGTH, MESSAGE_BUFFER_LENGTH)
 		for {
 			message := <-msgSendCh
 			serializeMessage(message, writeBuffer)
-			device.Write(writeBuffer)
+			log.Println(" <<<<<<<<<<< RAW MESSAGE: ", writeBuffer)
+			_, err := device.Write(writeBuffer)
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}()
 }
@@ -94,8 +100,7 @@ func doPingPong(msgSendCh chan *ControlMessage) {
 	ch := time.NewTicker(PING_PONG_SECONDS * time.Second).C
 	for {
 		<-ch
-		msg := ControlMessage{MESSAGE_LENGTH, MT_PING, 1}
-		log.Println("Sending PING message", msg)
+		msg := ControlMessage{MESSAGE_BUFFER_LENGTH - 1, MT_PING, 1}
 		msgSendCh <- &msg
 	}
 }
@@ -103,7 +108,10 @@ func doPingPong(msgSendCh chan *ControlMessage) {
 func doRead(readchan chan *ControlMessage) {
 	for {
 		message := <-readchan
-		log.Println("Message received", message)
+		switch message.MessageType {
+		case MT_PONG:
+			log.Println("PONG received!")
+		}
 	}
 }
 
@@ -112,7 +120,8 @@ func main() {
 	flag.Parse()
 
 	fmt.Println("Starting comm")
-	device, err := os.Open(*deviceName)
+	serialConfig := &serial.Config{Name: *deviceName, Baud: 9600}
+	serial, err := serial.OpenPort(serialConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -121,9 +130,11 @@ func main() {
 	messageRecvCh := make(chan *ControlMessage)
 
 	var wg sync.WaitGroup
-	startMessageIO(device, messageRecvCh, messageSendCh)
+
+	startMessageIO(serial, messageRecvCh, messageSendCh)
 	go doPingPong(messageSendCh)
 	go doRead(messageRecvCh)
+
 	wg.Add(1)
 	wg.Wait()
 }
